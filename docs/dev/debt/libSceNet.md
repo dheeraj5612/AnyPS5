@@ -71,7 +71,7 @@
 - [sceNetShowNetstatExForBuffer](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
 - [sceNetInetNtopWithScopeId](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
 - [sceNetInetPtonWithScopeId](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
-- [sceNetGetDns6Info](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
+- [sceNetGetDns6Info](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - the `(uint8_t* info, int flags)` signature, the two 16-byte IPv6 server slots and the server count as the return value follow [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/f68923fe807f657348e6719ce658bcbd0a2b1c72/src/core/libraries/net/net.cpp#L1365); unverified on PS5 hardware. It reports the host IPv6 DNS servers: on Windows those of the up, non-loopback adapter with a usable IPv6 address, preferring one with an IPv6 gateway and then the lowest IPv6 metric, without the `fec0:0:0:ffff::1` to `::3` placeholders Windows lists when none are configured; elsewhere the IPv6 `nameserver` lines of `/etc/resolv.conf` while `sceNetCtlGetStateV6` reports an address, skipping entries with a scope ID. Servers set through `sceNetSetDns6Info` are never reported. Zeroing the unused slots is unverified. Nonzero flags and a null info throw because their console results are unknown
 - [sceNetSetDns6InfoToKernel](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
 - [sceNetShowRoute6ForBuffer](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature
 - [sceNetConfigGetIfFlags](../../../core/libs/prx/libSceNet/Export.cpp) (libSceNet) - unknown signature

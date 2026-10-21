@@ -175,9 +175,23 @@ static bool UsableIpv4(in_addr address) {
 }
 
 #ifdef _WIN32
+static bool UsableIpv6(const in6_addr& address) {
+    return !IN6_IS_ADDR_UNSPECIFIED(&address) && !IN6_IS_ADDR_LOOPBACK(&address);
+}
+
 static const sockaddr_in* Ipv4Of(const SOCKET_ADDRESS& address) {
     if (!address.lpSockaddr || address.lpSockaddr->sa_family != AF_INET) return nullptr;
     return reinterpret_cast<const sockaddr_in*>(address.lpSockaddr);
+}
+
+static const sockaddr_in6* Ipv6Of(const SOCKET_ADDRESS& address) {
+    if (!address.lpSockaddr || address.lpSockaddr->sa_family != AF_INET6) return nullptr;
+    return reinterpret_cast<const sockaddr_in6*>(address.lpSockaddr);
+}
+
+static bool PlaceholderDns6(const in6_addr& address) {
+    static constexpr std::uint8_t prefix[15] = {0xFE, 0xC0, 0, 0, 0, 0, 0xFF, 0xFF};
+    return std::memcmp(address.s6_addr, prefix, sizeof(prefix)) == 0 && address.s6_addr[15] >= 1 && address.s6_addr[15] <= 3;
 }
 
 static std::uint32_t PrefixMask(unsigned length) {
@@ -357,6 +371,58 @@ extern "C" std::size_t NetCtlHostDnsServers_nid_no_patch(std::uint32_t* servers,
     if (!FindHostIpv4Interface(host)) return 0;
     for (std::size_t index = 0; index < host.dns.size() && index < capacity; ++index) servers[index] = host.dns[index].s_addr;
     return host.dns.size();
+}
+
+static std::vector<in6_addr> HostDns6Servers() {
+#ifdef _WIN32
+    ULONG size = 0;
+    const ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_INCLUDE_GATEWAYS;
+    if (GetAdaptersAddresses(AF_INET6, flags, nullptr, nullptr, &size) != ERROR_BUFFER_OVERFLOW) return {};
+    std::vector<std::uint8_t> storage(size);
+    auto* adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(storage.data());
+    if (GetAdaptersAddresses(AF_INET6, flags, nullptr, adapters, &size) != NO_ERROR) return {};
+    std::vector<in6_addr> servers;
+    bool chosen = false;
+    bool chosenHasGateway = false;
+    ULONG chosenMetric = 0;
+    for (auto* adapter = adapters; adapter; adapter = adapter->Next) {
+        if (adapter->OperStatus != IfOperStatusUp || adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+        auto* unicast = adapter->FirstUnicastAddress;
+        while (unicast && !(Ipv6Of(unicast->Address) && UsableIpv6(Ipv6Of(unicast->Address)->sin6_addr))) unicast = unicast->Next;
+        if (!unicast) continue;
+        auto* gateway = adapter->FirstGatewayAddress;
+        while (gateway && !Ipv6Of(gateway->Address)) gateway = gateway->Next;
+        if (chosen && !(gateway && (!chosenHasGateway || adapter->Ipv6Metric < chosenMetric))) continue;
+        servers.clear();
+        for (auto* server = adapter->FirstDnsServerAddress; server; server = server->Next) {
+            const auto* address = Ipv6Of(server->Address);
+            if (address && !PlaceholderDns6(address->sin6_addr)) servers.push_back(address->sin6_addr);
+        }
+        chosen = true;
+        chosenHasGateway = gateway != nullptr;
+        chosenMetric = adapter->Ipv6Metric;
+    }
+    return servers;
+#else
+    if (!HostHasAddress(AF_INET6)) return {};
+    std::ifstream config("/etc/resolv.conf");
+    std::vector<in6_addr> servers;
+    std::string line;
+    while (std::getline(config, line)) {
+        std::istringstream fields(line);
+        std::string keyword;
+        std::string value;
+        in6_addr server{};
+        if (fields >> keyword >> value && keyword == "nameserver" && inet_pton(AF_INET6, value.c_str(), &server) == 1) servers.push_back(server);
+    }
+    return servers;
+#endif
+}
+
+extern "C" std::size_t NetCtlHostDns6Servers_nid_no_patch(std::uint8_t* servers, std::size_t capacity) {
+    const auto found = HostDns6Servers();
+    for (std::size_t index = 0; index < found.size() && index < capacity; ++index) std::memcpy(servers + index * sizeof(in6_addr), &found[index], sizeof(in6_addr));
+    return found.size();
 }
 
 static void WriteInfoWord(NetCtlInfo* info, std::uint32_t value) {

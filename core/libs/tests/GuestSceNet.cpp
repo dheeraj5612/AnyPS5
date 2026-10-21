@@ -75,7 +75,9 @@ int APS5_VABI sceNetResolverDestroy(int);
 int APS5_VABI sceNetResolverGetError(int, int*);
 int APS5_VABI sceNetClearDnsCache(int);
 int APS5_VABI sceNetGetDnsInfo(std::uint32_t*, int);
+int APS5_VABI sceNetGetDns6Info(std::uint8_t*, int);
 int APS5_VABI sceNetCtlGetState(int*);
+int APS5_VABI sceNetCtlGetStateV6(int*);
 int APS5_VABI sceNetCtlGetInfo(int, NetCtlInfo*);
 int APS5_VABI sceNetCtlGetIfStat(NetCtlIfStat*);
 int APS5_VABI sceNetCtlRegisterCallback(NetCtlCallback, void*, int*);
@@ -1893,6 +1895,33 @@ int main() {
         }
         bool threw = false;
         try { sceNetGetDnsInfo(nullptr, 0); } catch (const std::runtime_error&) { threw = true; }
+        Require(threw);
+    }
+    {
+        std::array<std::uint8_t, 48> dns{};
+        dns.fill(0xA5);
+        const int count = sceNetGetDns6Info(dns.data(), 0);
+        Require(count >= 0 && count <= 2);
+        for (std::size_t index = 32; index < dns.size(); ++index) Require(dns[index] == 0xA5);
+        int stateV6 = -1;
+        Require(sceNetCtlGetStateV6(&stateV6) == 0);
+        Require(count == 0 || stateV6 == 3);
+        static constexpr std::array<std::uint8_t, 16> zero{};
+        for (int index = 0; index < 2; ++index) {
+            const std::uint8_t* server = dns.data() + index * 16;
+            Require((std::memcmp(server, zero.data(), zero.size()) == 0) == (index >= count));
+#ifdef _WIN32
+            static constexpr std::array<std::uint8_t, 15> placeholder = {0xFE, 0xC0, 0, 0, 0, 0, 0xFF, 0xFF};
+            Require(std::memcmp(server, placeholder.data(), placeholder.size()) != 0 || server[15] < 1 || server[15] > 3);
+#endif
+        }
+        for (const int flags : {0x1, -1}) {
+            bool threw = false;
+            try { sceNetGetDns6Info(dns.data(), flags); } catch (const std::runtime_error&) { threw = true; }
+            Require(threw);
+        }
+        bool threw = false;
+        try { sceNetGetDns6Info(nullptr, 0); } catch (const std::runtime_error&) { threw = true; }
         Require(threw);
     }
     NetCtlIfStat first{};
